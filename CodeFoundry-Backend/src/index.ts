@@ -12,7 +12,6 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-preview-05-20" });
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
 // Add this near the top
@@ -24,8 +23,10 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 // Update CORS middleware
+import { Request, Response } from 'express';
+
 app.use(cors({
-  origin: (origin, callback) => {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Allow requests with no origin (like mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
     
@@ -33,7 +34,7 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
-      callback(null, true); // Temporarily allow all for testing, change to false in production
+      callback(new Error('Not allowed by CORS'), false); // Block in production
     }
   },
   credentials: true
@@ -42,12 +43,12 @@ app.use(cors({
 
 
 // Health check endpoint
-app.get("/health", (req, res) => {
+app.get("/health", (req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // Template endpoint - determines if project is node or react
-app.post("/template", async (req, res) => {
+app.post("/template", async (req: Request, res: Response) => {
     try {
         const prompt = req.body.prompt;
         
@@ -134,13 +135,13 @@ Response (one word):`
         console.error("❌ Error in /template:", error);
         res.status(500).json({ 
             message: "Failed to process template request", 
-            error: error.message || "Unknown error"
+            error: (error as Error).message || "Unknown error"
         });
     }
 });
 
 // Chat endpoint - handles conversation with streaming support
-app.post("/chat", async (req, res) => {
+app.post("/chat", async (req: Request, res: Response) => {
     try {
         const { messages, stream = false } = req.body;
         
@@ -153,7 +154,7 @@ app.post("/chat", async (req, res) => {
         console.log("💬 Received chat request with", messages.length, "messages");
 
         const chat = model.startChat({
-            history: messages.slice(0, -1).map((msg: any) => ({
+            history: messages.slice(0, -1).map((msg: { role: string; content: string }) => ({
                 role: msg.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: msg.content }]
             })),
@@ -207,7 +208,7 @@ app.post("/chat", async (req, res) => {
         if (!res.headersSent) {
             res.status(500).json({ 
                 message: "Failed to process chat request", 
-                error: error.message || "Unknown error"
+                error: (error as Error).message || "Unknown error"
             });
         }
     }
