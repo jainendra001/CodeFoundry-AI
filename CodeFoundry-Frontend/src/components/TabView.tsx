@@ -1,5 +1,5 @@
 import React from 'react';
-import { Code2, Eye } from 'lucide-react';
+import { Code, Eye } from 'lucide-react';
 
 interface TabViewProps {
   activeTab: 'code' | 'preview';
@@ -8,28 +8,28 @@ interface TabViewProps {
 
 export function TabView({ activeTab, onTabChange }: TabViewProps) {
   return (
-    <div className="flex space-x-2 mb-4">
+    <div className="flex gap-2 border-b border-purple-500/20 pb-3">
       <button
         onClick={() => onTabChange('code')}
-        className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-300 ${
           activeTab === 'code'
-            ? 'bg-gray-700 text-gray-100'
-            : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+            ? 'bg-purple-600/20 text-purple-300 border border-purple-500/50 shadow-lg'
+            : 'text-gray-400 hover:text-purple-300 hover:bg-purple-600/10'
         }`}
       >
-        <Code2 className="w-4 h-4" />
-        Code
+        <Code className="w-4 h-4" />
+        <span>Code</span>
       </button>
       <button
         onClick={() => onTabChange('preview')}
-        className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-300 ${
           activeTab === 'preview'
-            ? 'bg-gray-700 text-gray-100'
-            : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+            ? 'bg-purple-600/20 text-purple-300 border border-purple-500/50 shadow-lg'
+            : 'text-gray-400 hover:text-purple-300 hover:bg-purple-600/10'
         }`}
       >
         <Eye className="w-4 h-4" />
-        Preview
+        <span>Preview</span>
       </button>
     </div>
   );

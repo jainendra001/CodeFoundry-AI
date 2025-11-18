@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { StepsList } from '../components/StepsList';
 import { FileExplorer } from '../components/FileExplorer';
 import { TabView } from '../components/TabView';
@@ -13,7 +13,7 @@ import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
-import { Send } from 'lucide-react';
+import { Send, Code2, Home, Sparkles } from 'lucide-react';
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -31,7 +31,6 @@ interface ChatResponse {
   timestamp?: string;
 }
 
-// LocalStorage helper functions
 const STORAGE_KEY = 'builder_state';
 
 interface StoredState {
@@ -72,6 +71,7 @@ const loadFromLocalStorage = (promptKey: string): StoredState | null => {
 
 export function Builder() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { prompt } = location.state as { prompt: string };
   const [userPrompt, setPrompt] = useState("");
   const [llmMessages, setLlmMessages] = useState<ChatMessage[]>([]);
@@ -88,7 +88,6 @@ export function Builder() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [files, setFiles] = useState<FileItem[]>([]);
 
-  // Load from localStorage on mount
   useEffect(() => {
     const stored = loadFromLocalStorage(prompt);
     if (stored && stored.messages.length > 0) {
@@ -101,7 +100,6 @@ export function Builder() {
     }
   }, [prompt]);
 
-  // Save to localStorage when messages change
   useEffect(() => {
     if (llmMessages.length > 0) {
       saveToLocalStorage({
@@ -211,7 +209,6 @@ export function Builder() {
   }, [files, webcontainer]);
 
   async function init() {
-    // Check if we already have stored data
     const stored = loadFromLocalStorage(prompt);
     if (stored && stored.messages.length > 0) {
       console.log("📦 Using cached data");
@@ -350,31 +347,82 @@ export function Builder() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col">
+    <div className="min-h-screen bg-gradient-dark flex flex-col relative overflow-hidden">
+      {/* Background Effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-pink-600/10 rounded-full blur-3xl"></div>
+      </div>
+
       {error && <ErrorMessage message={error} onClose={() => setError(null)} />}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       
-      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
-        <h1 className="text-xl font-semibold text-gray-100">Website Builder</h1>
-        <p className="text-sm text-gray-400 mt-1">Prompt: {prompt}</p>
+      {/* Premium Header */}
+      <header className="relative z-10 glass-effect border-b border-purple-500/20 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={() => navigate('/')}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg glass-effect-light border border-purple-500/30 hover:border-purple-500/50 transition-all duration-300 group"
+            >
+              <Home className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
+              <span className="text-sm font-medium text-gray-300">Home</span>
+            </button>
+            
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-primary rounded-lg blur-lg opacity-50"></div>
+                <div className="relative bg-gradient-primary p-2 rounded-lg">
+                  <Code2 className="w-5 h-5 text-white" />
+                </div>
+              </div>
+              <div>
+                <h1 className="font-heading text-xl font-bold text-gradient">CodeFoundry.AI</h1>
+                <p className="text-xs text-gray-500">AI-Powered Builder</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="glass-effect-light px-4 py-2 rounded-lg border border-purple-500/30">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
+                <span className="text-sm text-gray-400">Building:</span>
+                <span className="text-sm font-semibold text-purple-300 max-w-xs truncate">
+                  {prompt}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
       
-      <div className="flex-1 overflow-hidden">
+      {/* Main Content */}
+      <div className="relative z-10 flex-1 overflow-hidden">
         <div className="h-full grid grid-cols-4 gap-6 p-6">
-          <div className="col-span-1 space-y-6 overflow-auto">
-            <div>
-              <div className="max-h-[75vh] overflow-scroll">
+          {/* Left Sidebar - Steps & Chat */}
+          <div className="col-span-1 space-y-4 overflow-hidden flex flex-col">
+            <div className="glass-effect rounded-2xl border border-purple-500/20 p-4 flex-1 overflow-hidden flex flex-col">
+              <h2 className="font-heading text-lg font-semibold text-gray-200 mb-4 flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                Build Progress
+              </h2>
+              <div className="flex-1 overflow-auto mb-4">
                 <StepsList
                   steps={steps}
                   currentStep={currentStep}
                   onStepClick={setCurrentStep}
                 />
               </div>
-              <div className="mt-4">
+
+              {/* Chat Input */}
+              <div className="border-t border-purple-500/20 pt-4">
                 {(loading || !templateSet) ? (
-                  <Loader />
+                  <div className="flex items-center justify-center py-8">
+                    <Loader />
+                  </div>
                 ) : (
-                  <div className='flex flex-col gap-2'>
+                  <div className='flex flex-col gap-3'>
                     <textarea 
                       value={userPrompt} 
                       onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -385,37 +433,48 @@ export function Builder() {
                           handleSendMessage();
                         }
                       }}
-                      className='p-3 w-full bg-gray-800 text-gray-100 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none'
-                      placeholder="Enter follow-up instructions... (Cmd/Ctrl + Enter to send)"
+                      className='p-3 w-full bg-gray-900/50 text-gray-100 border border-purple-500/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent resize-none placeholder-gray-600 transition-all duration-300'
+                      placeholder="Refine your project... (⌘+Enter to send)"
                       rows={3}
                     />
                     <button 
                       onClick={handleSendMessage}
                       disabled={loading || !userPrompt.trim()}
-                      className='bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 font-medium'
+                      className='btn-premium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm py-3'
                     >
                       <Send className="w-4 h-4" />
-                      Send Message
+                      <span>Send to AI</span>
                     </button>
                   </div>
                 )}
               </div>
             </div>
           </div>
+
+          {/* File Explorer */}
           <div className="col-span-1">
-            <FileExplorer 
-              files={files} 
-              onFileSelect={setSelectedFile}
-            />
+            <div className="glass-effect rounded-2xl border border-purple-500/20 p-4 h-full overflow-hidden flex flex-col">
+              <h2 className="font-heading text-lg font-semibold text-gray-200 mb-4">Project Files</h2>
+              <div className="flex-1 overflow-auto">
+                <FileExplorer 
+                  files={files} 
+                  onFileSelect={setSelectedFile}
+                />
+              </div>
+            </div>
           </div>
-          <div className="col-span-2 bg-gray-900 rounded-lg shadow-lg p-4 h-[calc(100vh-8rem)]">
-            <TabView activeTab={activeTab} onTabChange={setActiveTab} />
-            <div className="h-[calc(100%-4rem)]">
-              {activeTab === 'code' ? (
-                <CodeEditor file={selectedFile} />
-              ) : (
-                <PreviewFrame webContainer={webcontainer} files={files} />
-              )}
+
+          {/* Code/Preview Area */}
+          <div className="col-span-2">
+            <div className="glass-effect rounded-2xl border border-purple-500/20 p-4 h-full flex flex-col overflow-hidden">
+              <TabView activeTab={activeTab} onTabChange={setActiveTab} />
+              <div className="flex-1 mt-4 overflow-hidden rounded-xl border border-purple-500/20">
+                {activeTab === 'code' ? (
+                  <CodeEditor file={selectedFile} />
+                ) : (
+                  <PreviewFrame webContainer={webcontainer} files={files} />
+                )}
+              </div>
             </div>
           </div>
         </div>
