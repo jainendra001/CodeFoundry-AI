@@ -14,6 +14,32 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Add this near the top
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://codefoundry-ai.vercel.app', // Your Vercel URL (update after deployment)
+  process.env.FRONTEND_URL || '', // Add via env variable
+].filter(Boolean);
+
+// Update CORS middleware
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(null, true); // Temporarily allow all for testing, change to false in production
+    }
+  },
+  credentials: true
+}));
+
+
+
 // Health check endpoint
 app.get("/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
