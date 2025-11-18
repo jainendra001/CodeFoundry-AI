@@ -14,10 +14,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 // Template endpoint - determines if project is node or react
 app.post("/template", async (req, res) => {
     try {
         const prompt = req.body.prompt;
+        
+        if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+            return res.status(400).json({ 
+                message: "Invalid prompt. Please provide a valid project description." 
+            });
+        }
+
         console.log("📥 Received template request:", prompt);
 
         const result = await model.generateContent({
@@ -25,78 +37,92 @@ app.post("/template", async (req, res) => {
                 {
                     role: "user",
                     parts: [{
-                        text: `You must respond with ONLY one word: either "react" or "node". No explanation, no punctuation, just the word.
+                        text: `You are a project type classifier. Respond with ONLY one word: "react" or "node".
 
-Analyze this project description and determine the type:
-"${prompt}"
+Project Description: "${prompt}"
 
-If it mentions: React, frontend, UI, components, web app, website → respond: react
-If it mentions: Express, backend, API, server, Node.js → respond: node
-If unclear → respond: react
+Rules:
+- If it mentions: website, web app, UI, frontend, React, components, design → respond: react
+- If it mentions: backend, API, server, Express, Node.js, database → respond: node
+- For general web projects or unclear cases → respond: react
 
-Your response (one word only):`
+Response (one word):`
                     }]
                 }
             ],
             generationConfig: {
                 maxOutputTokens: 10,
                 temperature: 0,
+                topP: 1,
+                topK: 1,
             },
         });
 
-        // Get the raw response
         const rawAnswer = result.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
         console.log("🤖 Raw AI response:", JSON.stringify(rawAnswer));
         
-        // Clean and parse the answer
+        // Clean and normalize the answer
         const answer = rawAnswer.trim().toLowerCase().replace(/[^a-z]/g, '');
         console.log("🤖 Cleaned answer:", answer);
 
-        // Check if it contains 'react' or 'node'
-        let projectType = '';
-        if (answer.includes('react')) {
-            projectType = 'react';
-        } else if (answer.includes('node')) {
+        // Determine project type with smart detection
+        let projectType: 'react' | 'node' = 'react';
+        
+        if (answer.includes('node')) {
             projectType = 'node';
-        } else {
-            // Default to react if unclear
-            console.log("⚠️ Unclear response, defaulting to react");
+        } else if (answer.includes('react')) {
             projectType = 'react';
+        } else {
+            // Fallback: analyze prompt keywords
+            const lowerPrompt = prompt.toLowerCase();
+            const nodeKeywords = ['backend', 'api', 'server', 'express', 'database', 'rest', 'graphql'];
+            const reactKeywords = ['website', 'web app', 'frontend', 'ui', 'component', 'page'];
+            
+            const hasNodeKeywords = nodeKeywords.some(keyword => lowerPrompt.includes(keyword));
+            const hasReactKeywords = reactKeywords.some(keyword => lowerPrompt.includes(keyword));
+            
+            if (hasNodeKeywords && !hasReactKeywords) {
+                projectType = 'node';
+            } else {
+                projectType = 'react';
+            }
+            
+            console.log("⚠️ Using keyword-based detection, result:", projectType);
         }
 
         console.log("✅ Final project type:", projectType);
 
-        if (projectType === "react") {
-            console.log("📦 Sending React template");
-            res.json({
-                prompts: [
-                    BASE_PROMPT,
-                    `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${reactBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n - .gitignore\n - package-lock.json\n`
-                ],
-                uiPrompts: [reactBasePrompt]
-            });
-            return;
-        } else {
-            console.log("📦 Sending Node template");
-            res.json({
-                prompts: [
-                    BASE_PROMPT,
-                    `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${nodeBasePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n - .gitignore\n - package-lock.json\n`
-                ],
-                uiPrompts: [nodeBasePrompt]
-            });
-            return;
-        }
-    } catch (error) {
+        const basePromptToUse = projectType === 'react' ? reactBasePrompt : nodeBasePrompt;
+        
+        res.json({
+            prompts: [
+                BASE_PROMPT,
+                `Here is an artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${basePromptToUse}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n - .gitignore\n - package-lock.json\n`
+            ],
+            uiPrompts: [basePromptToUse],
+            projectType
+        });
+
+    } catch (error: any) {
         console.error("❌ Error in /template:", error);
-        res.status(500).json({ message: "Internal server error", error: String(error) });
+        res.status(500).json({ 
+            message: "Failed to process template request", 
+            error: error.message || "Unknown error"
+        });
     }
 });
 
-// Chat endpoint - handles conversation
+// Chat endpoint - handles conversation with streaming support
 app.post("/chat", async (req, res) => {
     try {
-        const messages = req.body.messages;
+        const { messages, stream = false } = req.body;
+        
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ 
+                message: "Invalid messages. Please provide a valid message array." 
+            });
+        }
+
         console.log("💬 Received chat request with", messages.length, "messages");
 
         const chat = model.startChat({
@@ -104,32 +130,69 @@ app.post("/chat", async (req, res) => {
                 role: msg.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: msg.content }]
             })),
-            systemInstruction: { role: 'system', parts: [{ text: getSystemPrompt() }] },
+            systemInstruction: { 
+                role: 'system', 
+                parts: [{ text: getSystemPrompt() }] 
+            },
             generationConfig: {
                 maxOutputTokens: 8000,
+                temperature: 0.7,
             },
         });
 
         const lastMessage = messages[messages.length - 1].content;
         console.log("📤 Sending to Gemini:", lastMessage.substring(0, 100) + "...");
         
-        const chatResponse = await chat.sendMessage(lastMessage);
-        const responseText = chatResponse.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        
-        console.log("✅ Got response from Gemini:", responseText.substring(0, 100) + "...");
+        if (stream) {
+            // Streaming response
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
 
-        res.json({
-            response: responseText
-        });
-    } catch (error) {
+            const result = await chat.sendMessageStream(lastMessage);
+            
+            for await (const chunk of result.stream) {
+                const text = chunk.text();
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+            }
+            
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } else {
+            // Regular response
+            const chatResponse = await chat.sendMessage(lastMessage);
+            const responseText = chatResponse.response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            
+            if (!responseText) {
+                throw new Error("Empty response from AI");
+            }
+            
+            console.log("✅ Got response from Gemini:", responseText.substring(0, 100) + "...");
+
+            res.json({
+                response: responseText,
+                timestamp: new Date().toISOString()
+            });
+        }
+    } catch (error: any) {
         console.error("❌ Error in /chat:", error);
-        res.status(500).json({ message: "Internal server error", error: String(error) });
+        
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                message: "Failed to process chat request", 
+                error: error.message || "Unknown error"
+            });
+        }
     }
 });
 
-app.listen(3000, () => {
-    console.log("🚀 Server running on http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log("🚀 Server running on http://localhost:" + PORT);
     console.log("📡 Endpoints:");
+    console.log("   GET  /health - Health check");
     console.log("   POST /template - Determine project type");
-    console.log("   POST /chat - Chat with AI");
+    console.log("   POST /chat - Chat with AI (supports streaming)");
+    console.log("✨ Ready to build amazing projects!");
 });
