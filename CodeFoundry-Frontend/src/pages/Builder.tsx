@@ -6,11 +6,10 @@ import { TabView } from '../components/TabView';
 import { CodeEditor } from '../components/CodeEditor';
 import { PreviewFrame } from '../components/PreviewFrame';
 import { Step, FileItem, StepType } from '../types';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
-import { FileNode } from '@webcontainer/api';
 import { Loader } from '../components/Loader';
 
 const MOCK_FILE_CONTENT = `// This is a sample file content
@@ -22,11 +21,25 @@ function Component() {
 
 export default Component;`;
 
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface TemplateResponse {
+  prompts: string[];
+  uiPrompts: string[];
+}
+
+interface ChatResponse {
+  response: string;
+}
+
 export function Builder() {
   const location = useLocation();
   const { prompt } = location.state as { prompt: string };
   const [userPrompt, setPrompt] = useState("");
-  const [llmMessages, setLlmMessages] = useState<{role: "user" | "assistant", content: string;}[]>([]);
+  const [llmMessages, setLlmMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [templateSet, setTemplateSet] = useState(false);
   const webcontainer = useWebContainer();
@@ -36,28 +49,27 @@ export function Builder() {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   
   const [steps, setSteps] = useState<Step[]>([]);
-
   const [files, setFiles] = useState<FileItem[]>([]);
 
   useEffect(() => {
     let originalFiles = [...files];
     let updateHappened = false;
-    steps.filter(({status}) => status === "pending").map(step => {
+    steps.filter(({status}) => status === "pending").forEach((step) => {
       updateHappened = true;
       if (step?.type === StepType.CreateFile) {
-        let parsedPath = step.path?.split("/") ?? []; // ["src", "components", "App.tsx"]
-        let currentFileStructure = [...originalFiles]; // {}
-        let finalAnswerRef = currentFileStructure;
+        let parsedPath = step.path?.split("/") ?? [];
+        let currentFileStructure = [...originalFiles];
+        const finalAnswerRef = currentFileStructure;
   
         let currentFolder = ""
         while(parsedPath.length) {
           currentFolder =  `${currentFolder}/${parsedPath[0]}`;
-          let currentFolderName = parsedPath[0];
+          const currentFolderName = parsedPath[0];
           parsedPath = parsedPath.slice(1);
   
           if (!parsedPath.length) {
             // final file
-            let file = currentFileStructure.find(x => x.path === currentFolder)
+            const file = currentFileStructure.find(x => x.path === currentFolder)
             if (!file) {
               currentFileStructure.push({
                 name: currentFolderName,
@@ -70,7 +82,7 @@ export function Builder() {
             }
           } else {
             /// in a folder
-            let folder = currentFileStructure.find(x => x.path === currentFolder)
+            const folder = currentFileStructure.find(x => x.path === currentFolder)
             if (!folder) {
               // create the folder
               currentFileStructure.push({
@@ -86,18 +98,15 @@ export function Builder() {
         }
         originalFiles = finalAnswerRef;
       }
-
     })
 
     if (updateHappened) {
-
       setFiles(originalFiles)
-      setSteps(steps => steps.map((s: Step) => {
+      setSteps(prevSteps => prevSteps.map((s: Step) => {
         return {
           ...s,
-          status: "completed"
+          status: "completed" as const
         }
-        
       }))
     }
     console.log(files);
@@ -107,9 +116,8 @@ export function Builder() {
     const createMountStructure = (files: FileItem[]): Record<string, any> => {
       const mountStructure: Record<string, any> = {};
   
-      const processFile = (file: FileItem, isRootFolder: boolean) => {  
+      const processFile = (file: FileItem, isRootFolder: boolean): any => {  
         if (file.type === 'folder') {
-          // For folders, create a directory entry
           mountStructure[file.name] = {
             directory: file.children ? 
               Object.fromEntries(
@@ -125,7 +133,6 @@ export function Builder() {
               }
             };
           } else {
-            // For files, create a file entry with contents
             return {
               file: {
                 contents: file.content || ''
@@ -137,57 +144,88 @@ export function Builder() {
         return mountStructure[file.name];
       };
   
-      // Process each top-level file/folder
       files.forEach(file => processFile(file, true));
   
       return mountStructure;
     };
   
     const mountStructure = createMountStructure(files);
-  
-    // Mount the structure if WebContainer is available
     console.log(mountStructure);
     webcontainer?.mount(mountStructure);
   }, [files, webcontainer]);
 
   async function init() {
-    const response = await axios.post(`${BACKEND_URL}/template`, {
-      prompt: prompt.trim()
-    });
-    setTemplateSet(true);
-    
-    const {prompts, uiPrompts} = response.data;
+    try {
+      setLoading(true);
+      console.log("🚀 Fetching template for prompt:", prompt.trim());
+      
+      const response = await axios.post<TemplateResponse>(`${BACKEND_URL}/template`, {
+        prompt: prompt.trim()
+      });
+      
+      console.log("✅ Template response:", response.data);
+      setTemplateSet(true);
+      
+      const {prompts, uiPrompts} = response.data;
 
-    setSteps(parseXml(uiPrompts[0]).map((x: Step) => ({
-      ...x,
-      status: "pending"
-    })));
+      // Parse initial UI steps
+      setSteps(parseXml(uiPrompts[0]).map((x: Step) => ({
+        ...x,
+        status: "pending" as const
+      })));
 
-    setLoading(true);
-    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
-      messages: [...prompts, prompt].map(content => ({
-        role: "user",
-        content
-      }))
-    })
+      // Build proper chat messages - prompts are system/user instructions
+      const chatMessages: ChatMessage[] = [
+        ...prompts.map((content: string) => ({
+          role: "user" as const,
+          content
+        })),
+        {
+          role: "user" as const,
+          content: prompt
+        }
+      ];
 
-    setLoading(false);
+      console.log("💬 Sending chat request with", chatMessages.length, "messages");
 
-    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
-      ...x,
-      status: "pending" as "pending"
-    }))]);
+      const stepsResponse = await axios.post<ChatResponse>(`${BACKEND_URL}/chat`, {
+        messages: chatMessages
+      });
 
-    setLlmMessages([...prompts, prompt].map(content => ({
-      role: "user",
-      content
-    })));
+      console.log("✅ Chat response received");
+      setLoading(false);
 
-    setLlmMessages(x => [...x, {role: "assistant", content: stepsResponse.data.response}])
+      // Parse and add new steps from AI response
+      const newSteps = parseXml(stepsResponse.data.response);
+      setSteps(s => [...s, ...newSteps.map((x: Step) => ({
+        ...x,
+        status: "pending" as const
+      }))]);
+
+      // Update message history
+      setLlmMessages([
+        ...chatMessages,
+        {
+          role: "assistant" as const,
+          content: stepsResponse.data.response
+        }
+      ]);
+
+    } catch (error) {
+      console.error("❌ Error in init:", error);
+      setLoading(false);
+      const errorMessage = error instanceof AxiosError 
+        ? error.response?.data?.message || error.message 
+        : error instanceof Error 
+        ? error.message 
+        : "Unknown error occurred";
+      alert("Error initializing builder: " + errorMessage);
+    }
   }
 
   useEffect(() => {
     init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
@@ -213,33 +251,64 @@ export function Builder() {
                   <br />
                   {(loading || !templateSet) && <Loader />}
                   {!(loading || !templateSet) && <div className='flex'>
-                    <textarea value={userPrompt} onChange={(e) => {
-                    setPrompt(e.target.value)
-                  }} className='p-2 w-full'></textarea>
+                    <textarea 
+                      value={userPrompt} 
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                        setPrompt(e.target.value)
+                      }} 
+                      className='p-2 w-full'
+                      placeholder="Enter follow-up instructions..."
+                    ></textarea>
                   <button onClick={async () => {
-                    const newMessage = {
-                      role: "user" as "user",
-                      content: userPrompt
-                    };
+                    try {
+                      if (!userPrompt.trim()) {
+                        alert("Please enter a message");
+                        return;
+                      }
 
-                    setLoading(true);
-                    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
-                      messages: [...llmMessages, newMessage]
-                    });
-                    setLoading(false);
+                      const newMessage: ChatMessage = {
+                        role: "user",
+                        content: userPrompt
+                      };
 
-                    setLlmMessages(x => [...x, newMessage]);
-                    setLlmMessages(x => [...x, {
-                      role: "assistant",
-                      content: stepsResponse.data.response
-                    }]);
-                    
-                    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
-                      ...x,
-                      status: "pending" as "pending"
-                    }))]);
+                      setLoading(true);
+                      console.log("💬 Sending follow-up message:", newMessage.content);
+                      
+                      const stepsResponse = await axios.post<ChatResponse>(`${BACKEND_URL}/chat`, {
+                        messages: [...llmMessages, newMessage]
+                      });
+                      
+                      console.log("✅ Follow-up response received");
+                      setLoading(false);
 
-                  }} className='bg-purple-400 px-4'>Send</button>
+                      // Update messages
+                      const assistantMessage: ChatMessage = {
+                        role: "assistant",
+                        content: stepsResponse.data.response
+                      };
+
+                      setLlmMessages(x => [...x, newMessage, assistantMessage]);
+                      
+                      // Parse and add new steps
+                      const newSteps = parseXml(stepsResponse.data.response);
+                      setSteps(s => [...s, ...newSteps.map((x: Step) => ({
+                        ...x,
+                        status: "pending" as const
+                      }))]);
+
+                      setPrompt(""); // Clear input after sending
+
+                    } catch (error) {
+                      console.error("❌ Error sending message:", error);
+                      setLoading(false);
+                      const errorMessage = error instanceof AxiosError 
+                        ? error.response?.data?.message || error.message 
+                        : error instanceof Error 
+                        ? error.message 
+                        : "Unknown error occurred";
+                      alert("Error sending message: " + errorMessage);
+                    }
+                  }} className='bg-purple-400 px-4 hover:bg-purple-500 transition-colors cursor-pointer'>Send</button>
                   </div>}
                 </div>
               </div>
